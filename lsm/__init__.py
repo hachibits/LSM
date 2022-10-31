@@ -3,36 +3,57 @@ import numpy as np
 
 
 def create_iaf_psc_exp(n_E, n_I):
-    model_parameters = {
-        'C_m': 250.0,
-        'E_L': -70.0,
-        't_ref': 2.0,
-        'tau_syn_ex': 2.0,
-        'tau_syn_in': 2.0,
-        'V_m': nest.random.uniform(-70.0,-60.0),
-        'V_reset': -70.0,
-        'V_th': -55.0,
-    }
-    nodes = nest.Create('iaf_psc_exp', n_E + n_I, model_parameters)
+    nodes = nest.Create('iaf_psc_exp', n_E + n_I,
+                        {'C_m': 250.0,
+                         'E_L': -70.0,
+                         't_ref': 2.0,
+                         'tau_syn_ex': 2.0,
+                         'tau_syn_in': 2.0,
+                         'V_m': nest.random.uniform(-70.0,-60.0),
+                         'V_reset': -70.0,
+                         'V_th': -55.0})
+
     nest.SetStatus(nodes, [{'I_e': 13.5} for _ in nodes])
     # nest.SetStatus(nodes, [{'I_e': np.minimum(14.9, np.maximum(0, np.random.lognormal(2.65, 0.025)))} for _ in nodes])
 
     return nodes[:n_E], nodes[n_E:]
 
+
 def connect_tsodyks(nodes_E, nodes_I):
     n_syn_exc = 2
     n_syn_inh = 1
 
-    def connect(src, trg, model, n_syn=10):
-        nest.CopyModel("tsodyks_synapse", model)
-        nest.Connect(src, trg,
-                     {'rule': 'fixed_indegree', 'indegree': n_syn},
-                     {'weight': 10.0 if model[0] == 'E' else -10.0})
+    w_scale = 10.0
+    J_EE = w_scale * 5.0
+    J_EI = w_scale * 25.0
+    J_IE = w_scale * -20.0
+    J_II = w_scale * -20.0
 
-    connect(nodes_E, nodes_E, "EE", n_syn_exc)
-    connect(nodes_E, nodes_I, "EI", n_syn_exc)
-    connect(nodes_I, nodes_E, "IE", n_syn_inh)
-    connect(nodes_I, nodes_I, "II", n_syn_inh)
+    def connect(src, trg, model, n_syn, syn_param):
+        nest.CopyModel("tsodyks_synapse", model, syn_param)
+        if J < 0:
+            nest.Connect(src, trg,
+                         {'rule': 'fixed_indegree', 'indegree': n_syn},
+                         {'model': model})
+
+    def _syn_param(tau_psc, tau_rec, tau_fac, U, J):
+        return {"tau_psc": tau_psc,
+                "tau_rec": tau_rec, # recovery time constant in ms
+                "tau_fac": tau_fac, # facilitation time constant in ms
+                "U": U, # utilization
+                "delay": 0.1,
+                "weight": {"distribution": "normal_clipped", "mu": J, "sigma": 0.7 * abs(J),
+                           "low" if J >= 0 else "high": 0.
+                           },
+                "u": 0.0,
+                "x": 1.0
+                }
+
+    connect(nodes_E, nodes_E, "EE", n_syn_exc, _syn_param(tau_psc=2.0, tau_fac=1.0, tau_rec=813., U=0.59, J=J_EE))
+    connect(nodes_E, nodes_I, "EI", n_syn_exc, _syn_param(tau_psc=2.0, tau_fac=1790.0, tau_rec=399., U=0.049, J=J_EI))
+    connect(nodes_I, nodes_E, "IE", n_syn_inh, _syn_param(tau_psc=2.0, tau_fac=376.0, tau_rec=45., U=0.016, J=J_IE))
+    connect(nodes_I, nodes_I, "II", n_syn_inh, _syn_param(tau_psc=2.0, tau_fac=21.0, tau_rec=706., U=0.25, J=J_II))
+
 
 class LSM(object):
     def __init__(self, n_exc, n_inh, n_rec,
