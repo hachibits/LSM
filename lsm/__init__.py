@@ -6,14 +6,17 @@ import numpy as np
 
 def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
     membrane_voltage_interval = [13.5, 15.0]
+    pos = nest.spatial.grid(
+        shape=[15,3,3],
+        extent=[15,3,3]
+    )
     nodes = nest.Create('iaf_psc_exp', n_E + n_I,
                         {'tau_m': 30.0,
                          't_ref': 2.0,
                          'V_th': 15.0,
                          'E_L': 0.0,
-                         'tau_syn_ex': 3.0,
-                         'tau_syn_in': 6.0,
-                         'V_m': nest.random.uniform(membrane_voltage_interval[0],membrane_voltage_interval[1])})
+                         'V_m': nest.random.uniform(membrane_voltage_interval[0],membrane_voltage_interval[1])},
+                         positions=pos)
 
     nest.SetStatus(nodes, [{'I_e': 13500.0} for _ in nodes])
     # nest.SetStatus(nodes, [{'I_e': np.minimum(14.9, np.maximum(0, np.random.lognormal(2.65, 0.025)))} for _ in nodes])
@@ -38,25 +41,34 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection):
                 syn_param: dict[str, float]):
         nest.Connect(src, trg,
                      {'rule': 'fixed_indegree', 'indegree': n_syn},
-                     dict({'model': 'tsodyks_synapse', 'delay': 0.1,
+                     dict({'model': 'tsodyks_synapse',
                            'weight': {"distribution": "normal_clipped", "mu": J, "sigma": 0.7 * abs(J),
                                       "low" if J >= 0 else "high": 0.
                            }},
                           **syn_param))
 
-    def _syn_param(tau_psc: float, tau_rec: float, tau_fac: float, U: float) -> dict[str, float]:
-        return {"tau_psc": tau_psc,
-                "tau_rec": tau_rec, # recovery time constant in ms
-                "tau_fac": tau_fac, # facilitation time constant in ms
-                "U": U, # utilization
+    def _syn_param(tau_psc: float, UDF: dict[str, float], delay: float) -> dict[str, float]:
+        return dict({"tau_psc": tau_psc,
+                #"tau_rec": tau_rec, # recovery time constant in ms
+                #"tau_fac": tau_fac, # facilitation time constant in ms
+                #"U": U, # utilization
                 "u": 0.0,
-                "x": 1.0
-                }
+                "x": 1.0,
+                "delay": delay
+                }, **UDF)
 
-    connect(nodes_E, nodes_E, J_EE, n_syn_exc, _syn_param(tau_psc=2.0, tau_fac=1.0, tau_rec=813., U=0.59))
-    connect(nodes_E, nodes_I, J_EI, n_syn_exc, _syn_param(tau_psc=2.0, tau_fac=1790.0, tau_rec=399., U=0.049))
-    connect(nodes_I, nodes_E, J_IE, n_syn_inh, _syn_param(tau_psc=2.0, tau_fac=376.0, tau_rec=45., U=0.016))
-    connect(nodes_I, nodes_I, J_II, n_syn_inh, _syn_param(tau_psc=2.0, tau_fac=21.0, tau_rec=706., U=0.25))
+    @staticmethod
+    def _gaussian(U_mu: float, D_mu: float, F_mu: float) -> list(float):
+        return {
+            "U": np.random.normal(U_mu, 0.5*U_mu),
+            "tau_rec": np.random.normal(D_mu, 0.5*D_mu),
+            "tau_fac": np.random.normal(F_mu, 0.5*F_mu)
+        }
+
+    connect(nodes_E, nodes_E, J_EE, n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.5, 1.1, .05), delay=1.5))
+    connect(nodes_E, nodes_I, J_EI, n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.05, .125, 1.2), delay=0.8))
+    connect(nodes_I, nodes_E, J_IE, n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.25, .7, .02), delay=0.8))
+    connect(nodes_I, nodes_I, J_II, n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.32, .144, .06), delay=0.8))
 
 
 class LSM(object):
