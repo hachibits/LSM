@@ -1,25 +1,27 @@
+from __future__ import annotations
+
 import nest
 import numpy as np
 
 
-def create_iaf_psc_exp(n_E, n_I):
+def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
+    membrane_voltage_interval = [13.5, 15.0]
     nodes = nest.Create('iaf_psc_exp', n_E + n_I,
-                        {'C_m': 250.0,
-                         'E_L': -70.0,
+                        {'tau_m': 30.0,
                          't_ref': 2.0,
-                         'tau_syn_ex': 2.0,
-                         'tau_syn_in': 2.0,
-                         'V_m': nest.random.uniform(-70.0,-60.0),
-                         'V_reset': -70.0,
-                         'V_th': -55.0})
+                         'V_th': 15.0,
+                         'E_L': 0.0,
+                         'tau_syn_ex': 3.0,
+                         'tau_syn_in': 6.0,
+                         'V_m': nest.random.uniform(membrane_voltage_interval[0],membrane_voltage_interval[1])})
 
-    nest.SetStatus(nodes, [{'I_e': 13.5} for _ in nodes])
+    nest.SetStatus(nodes, [{'I_e': 13500.0} for _ in nodes])
     # nest.SetStatus(nodes, [{'I_e': np.minimum(14.9, np.maximum(0, np.random.lognormal(2.65, 0.025)))} for _ in nodes])
 
     return nodes[:n_E], nodes[n_E:]
 
 
-def connect_tsodyks(nodes_E, nodes_I):
+def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection):
     n_syn_exc = 2
     n_syn_inh = 1
 
@@ -29,7 +31,11 @@ def connect_tsodyks(nodes_E, nodes_I):
     J_IE = w_scale * -20.0
     J_II = w_scale * -20.0
 
-    def connect(src, trg, J, n_syn, syn_param):
+    def connect(src: nest.NodeCollection,
+                trg: nest.NodeCollection,
+                J: float,
+                n_syn: int,
+                syn_param: dict[str, float]):
         nest.Connect(src, trg,
                      {'rule': 'fixed_indegree', 'indegree': n_syn},
                      dict({'model': 'tsodyks_synapse', 'delay': 0.1,
@@ -38,7 +44,7 @@ def connect_tsodyks(nodes_E, nodes_I):
                            }},
                           **syn_param))
 
-    def _syn_param(tau_psc, tau_rec, tau_fac, U):
+    def _syn_param(tau_psc: float, tau_rec: float, tau_fac: float, U: float) -> dict[str, float]:
         return {"tau_psc": tau_psc,
                 "tau_rec": tau_rec, # recovery time constant in ms
                 "tau_fac": tau_fac, # facilitation time constant in ms
