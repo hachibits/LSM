@@ -20,6 +20,8 @@ def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
 
 
 def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) -> None:
+    tau = 0.1
+
     n_syn_exc = 2
     n_syn_inh = 1
 
@@ -29,6 +31,13 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
     J_IE = w_scale * -20.0
     J_II = w_scale * -20.0
 
+    def get_u_0(U, D, F):
+        return U / (1 - (1 - U) * np.exp(-1 / (F / tau)))
+
+    def get_x_0(U, D, F):
+        return (1 - np.exp(-1 / (D / tau))) / (1 - (1 - get_u_0(U, D, F)) * np.exp(-1 / (D / tau)))
+
+
     def connect(src: nest.NodeCollection,
                 trg: nest.NodeCollection,
                 J: float,
@@ -36,7 +45,7 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
                 syn_param: dict[str, float]) -> None:
         nest.Connect(src, trg,
                      {'rule': 'fixed_indegree', 'indegree': n_syn},
-                     dict({'model': 'tsodyks_synapse',
+                     dict({'synapse_model': 'tsodyks_synapse',
                            'weight': {"distribution": "normal_clipped", "mu": J, "sigma": 0.7 * abs(J),
                                       "low" if J >= 0 else "high": 0.
                            }},
@@ -44,13 +53,13 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
 
     def _syn_param(tau_psc: float, UDF: dict[str, float], delay: float) -> dict[str, float]:
         return dict({"tau_psc": tau_psc,
-                #"tau_rec": tau_rec, # recovery time constant in ms
-                #"tau_fac": tau_fac, # facilitation time constant in ms
-                #"U": U, # utilization
-                "u": 0.0,
-                "x": 1.0,
-                "delay": delay
-                }, **UDF)
+                     "U": UDF["U"], # utilization
+                     "u": get_u_0(UDF["U"], UDF["tau_rec"], UDF["tau_fac"]),
+                     "x": get_x_0(UDF["U"], UDF["tau_rec"], UDF["tau_fac"]),
+                     "tau_rec": UDF["tau_rec"], # recovery time constant in ms
+                     "tau_fac": UDF["tau_fac"], # facilitation time constant in ms
+                     "delay": delay
+                    }, **UDF)
 
     @staticmethod
     def _gaussian(U_mu: float, D_mu: float, F_mu: float) -> list(float):
