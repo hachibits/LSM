@@ -6,17 +6,12 @@ import numpy as np
 
 def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
     membrane_voltage_interval = [13.5, 15.0]
-    pos = nest.spatial.grid(
-        shape=[15,3,3],
-        extent=[15,3,3]
-    )
     nodes = nest.Create('iaf_psc_exp', n_E + n_I,
                         {'tau_m': 30.0,
                          't_ref': 2.0,
                          'V_th': 15.0,
                          'E_L': 0.0,
-                         'V_m': nest.random.uniform(membrane_voltage_interval[0],membrane_voltage_interval[1])},
-                         positions=pos)
+                         'V_m': nest.random.uniform(membrane_voltage_interval[0],membrane_voltage_interval[1])})
 
     nest.SetStatus(nodes, [{'I_e': 13500.0} for _ in nodes])
     # nest.SetStatus(nodes, [{'I_e': np.minimum(14.9, np.maximum(0, np.random.lognormal(2.65, 0.025)))} for _ in nodes])
@@ -24,7 +19,7 @@ def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
     return nodes[:n_E], nodes[n_E:]
 
 
-def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection):
+def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) -> None:
     n_syn_exc = 2
     n_syn_inh = 1
 
@@ -38,7 +33,7 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection):
                 trg: nest.NodeCollection,
                 J: float,
                 n_syn: int,
-                syn_param: dict[str, float]):
+                syn_param: dict[str, float]) -> None:
         nest.Connect(src, trg,
                      {'rule': 'fixed_indegree', 'indegree': n_syn},
                      dict({'model': 'tsodyks_synapse',
@@ -89,4 +84,5 @@ class LSM(object):
         self._rec_detector = nest.Create('spike_recorder', 1)
 
         nest.Connect(self.rec_nodes, self._rec_detector)
+
 
