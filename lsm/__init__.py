@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import nest
 import numpy as np
+import math
+
+from utils import windowed_events, get_spike_times
 
 
 def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
@@ -22,14 +25,20 @@ def create_iaf_psc_exp(n_E: int, n_I: int) -> nest.NodeCollection(list):
 def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) -> None:
     tau = 0.1
 
-    n_syn_exc = 2
-    n_syn_inh = 1
-
     A_mu = {
-        "EE": 30.0, 
+        "EE": 30.0,
         "EI": 60.0,
         "IE": -19.0,
         "II": -19.0
+    }
+
+    _lambda = 2
+
+    C = {
+        "EE": 0.3,
+        "EI": 0.2,
+        "IE": 0.4,
+        "II": 0.1
     }
 
     def get_u_0(U, D, F):
@@ -42,10 +51,10 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
     def connect(src: nest.NodeCollection,
                 trg: nest.NodeCollection,
                 conn_type: str,
-                n_syn: int,
                 syn_param: dict[str, float]) -> None:
+        D_euclid = 1.4142 if src == trg else 0.
         nest.Connect(src, trg,
-                     {'rule': 'fixed_indegree', 'indegree': n_syn},
+                     {'rule': 'pairwise_bernoulli', 'p': C[conn_type] * math.exp(-(D_euclid / _lambda) ** 2)},
                      dict({'synapse_model': 'tsodyks_synapse',
                            'weight': np.random.normal(A_mu[conn_type] * 1e3, 1)},
                           **syn_param))
@@ -62,16 +71,20 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
 
     @staticmethod
     def _gaussian(U_mu: float, D_mu: float, F_mu: float) -> list(float):
+        U = np.random.normal(U_mu, 0.5)
+        tau_rec = np.random.normal(D_mu, 0.5)
+        tau_fac = np.random.normal(F_mu, 0.5)
+
         return {
-            "U": np.random.normal(U_mu, 0.5),
-            "tau_rec": np.random.normal(D_mu, 0.5),
-            "tau_fac": np.random.normal(F_mu, 0.5)
+            "U": U if U > 0 and U < 1 else np.random.uniform(0, 1),
+            "tau_rec": tau_rec if tau_rec > 0 and tau_rec < 1 else np.random.uniform(0, 1),
+            "tau_fac": tau_fac if tau_fac > 0 and tau_fac < 1 else np.random.uniform(0, 1)
         }
 
-    connect(nodes_E, nodes_E, 'EE', n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.5, 1.1, .05), delay=1.5))
-    connect(nodes_E, nodes_I, 'EI', n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.05, .125, 1.2), delay=0.8))
-    connect(nodes_I, nodes_E, 'IE', n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.25, .7, .02), delay=0.8))
-    connect(nodes_I, nodes_I, 'II', n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.32, .144, .06), delay=0.8))
+    connect(nodes_E, nodes_E, 'EE', _syn_param(tau_psc=3.0, UDF=_gaussian(.5, 1.1, .05), delay=1.5))
+    connect(nodes_E, nodes_I, 'EI', _syn_param(tau_psc=3.0, UDF=_gaussian(.05, .125, 1.2), delay=0.8))
+    connect(nodes_I, nodes_E, 'IE', _syn_param(tau_psc=6.0, UDF=_gaussian(.25, .7, .02), delay=0.8))
+    connect(nodes_I, nodes_I, 'II', _syn_param(tau_psc=6.0, UDF=_gaussian(.32, .144, .06), delay=0.8))
 
 
 class LSM(object):
@@ -89,8 +102,45 @@ class LSM(object):
         self.n_inh = n_inh
         self.n_rec = n_rec
 
-        self._rec_detector = nest.Create('spike_recorder', 1)
+        self._rec_detector = nest.Create('spike_recorder')
 
         nest.Connect(self.rec_nodes, self._rec_detector)
+
+    def get_states(self, times, tau):
+        spike_times = get_spike_times(self._rec_detector, self.rec_nodes)
+        return LSM._get_liquid_states(spike_times, times, tau)
+
+    @staticmethod
+    def compute_readout_weights(states, targets, reg_fact=0):
+        """
+        Train readout with linear regression
+        :param states: numpy array with states[i, j], the state of neuron j in example i
+        :param targets: numpy array with targets[i], while target i corresponds to example i
+        :param reg_fact: regularization factor; 0 results in no regularization
+        :return: numpy array with weights[j]
+        """
+        if reg_fact == 0:
+            w = np.linalg.lstsq(states, targets)[0]
+        else:
+            w = np.dot(np.dot(np.linalg.inv(reg_fact * np.eye(np.size(states, 1)) + np.dot(states.T, states)),
+                              states.T),
+                       targets)
+        return w
+
+    @staticmethod
+    def compute_prediction(states, readout_weights):
+        return np.dot(states, readout_weights)
+
+    @staticmethod
+    def _get_liquid_states(spike_times, times, tau, t_window=None):
+        n_neurons = np.size(spike_times, 0)
+        n_times = np.size(times, 0)
+        states = np.zeros((n_times, n_neurons))
+        if t_window is None:
+            t_window = 3 * tau
+        for n, spt in enumerate(spike_times):
+            for i, (t, window_spikes) in enumerate(windowed_events(np.array(spt), times, t_window)):
+                states[n_times - i - 1, n] = sum(np.exp(-(t - window_spikes) / tau))
+        return states
 
 
