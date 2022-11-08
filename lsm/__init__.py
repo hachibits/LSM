@@ -25,11 +25,12 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
     n_syn_exc = 2
     n_syn_inh = 1
 
-    w_scale = 10.0
-    J_EE = w_scale * 5.0
-    J_EI = w_scale * 25.0
-    J_IE = w_scale * -20.0
-    J_II = w_scale * -20.0
+    A_mu = {
+        "EE": 30.0, 
+        "EI": 60.0,
+        "IE": -19.0,
+        "II": -19.0
+    }
 
     def get_u_0(U, D, F):
         return U / (1 - (1 - U) * np.exp(-1 / (F / tau)))
@@ -40,15 +41,13 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
 
     def connect(src: nest.NodeCollection,
                 trg: nest.NodeCollection,
-                J: float,
+                conn_type: str,
                 n_syn: int,
                 syn_param: dict[str, float]) -> None:
         nest.Connect(src, trg,
                      {'rule': 'fixed_indegree', 'indegree': n_syn},
                      dict({'synapse_model': 'tsodyks_synapse',
-                           'weight': {"distribution": "normal_clipped", "mu": J, "sigma": 0.7 * abs(J),
-                                      "low" if J >= 0 else "high": 0.
-                           }},
+                           'weight': np.random.normal(A_mu[conn_type] * 1e3, 1)},
                           **syn_param))
 
     def _syn_param(tau_psc: float, UDF: dict[str, float], delay: float) -> dict[str, float]:
@@ -64,15 +63,15 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
     @staticmethod
     def _gaussian(U_mu: float, D_mu: float, F_mu: float) -> list(float):
         return {
-            "U": np.random.normal(U_mu, 0.5*U_mu),
-            "tau_rec": np.random.normal(D_mu, 0.5*D_mu),
-            "tau_fac": np.random.normal(F_mu, 0.5*F_mu)
+            "U": np.random.normal(U_mu, 0.5),
+            "tau_rec": np.random.normal(D_mu, 0.5),
+            "tau_fac": np.random.normal(F_mu, 0.5)
         }
 
-    connect(nodes_E, nodes_E, J_EE, n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.5, 1.1, .05), delay=1.5))
-    connect(nodes_E, nodes_I, J_EI, n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.05, .125, 1.2), delay=0.8))
-    connect(nodes_I, nodes_E, J_IE, n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.25, .7, .02), delay=0.8))
-    connect(nodes_I, nodes_I, J_II, n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.32, .144, .06), delay=0.8))
+    connect(nodes_E, nodes_E, 'EE', n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.5, 1.1, .05), delay=1.5))
+    connect(nodes_E, nodes_I, 'EI', n_syn_exc, _syn_param(tau_psc=3.0, UDF=_gaussian(.05, .125, 1.2), delay=0.8))
+    connect(nodes_I, nodes_E, 'IE', n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.25, .7, .02), delay=0.8))
+    connect(nodes_I, nodes_I, 'II', n_syn_inh, _syn_param(tau_psc=6.0, UDF=_gaussian(.32, .144, .06), delay=0.8))
 
 
 class LSM(object):
