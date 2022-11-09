@@ -87,11 +87,31 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
     connect(nodes_I, nodes_I, 'II', _syn_param(tau_psc=6.0, UDF=_gaussian(.32, .144, .06), delay=0.8))
 
 
+def inject_noise(nodes_E, nodes_I):
+    p_rate = 25.0
+    A_noise = 1.0
+    delay = dict(distribution='normal_clipped', mu=10., sigma=20., low=3., high=200.)
+
+    noise = nest.Create('poisson_generator', 1, {'rate': p_rate})
+
+    nest.Connect(noise, nodes_E + nodes_I, syn_spec={'model': 'static_synapse',
+                                                     'weight': {
+                                                         'distribution': 'normal',
+                                                         'mu': A_noise,
+                                                         'sigma': 0.7 * A_noise
+                                                     },
+                                                     'delay': dict(distribution='normal_clipped',
+                                                                   mu=10., sigma=20.,
+                                                                   low=3., high=200.)
+    })
+
+
 class LSM(object):
     def __init__(self, n_exc, n_inh, n_rec,
-                 create=create_iaf_psc_exp, connect=connect_tsodyks):
+                 create=create_iaf_psc_exp, connect=connect_tsodyks, inject_noise=inject_noise):
         neurons_exc, neurons_inh = create(n_exc, n_inh)
         connect(neurons_exc, neurons_inh)
+        inject_noise(neurons_exc, neurons_inh)
 
         self.exc_nodes = neurons_exc
         self.inh_nodes = neurons_inh
