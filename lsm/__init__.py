@@ -3,6 +3,7 @@ from __future__ import annotations
 import nest
 import numpy as np
 import math
+import scipy.stats as stats
 
 from utils import windowed_events, get_spike_times
 
@@ -88,21 +89,22 @@ def connect_tsodyks(nodes_E: nest.NodeCollection, nodes_I: nest.NodeCollection) 
 
 
 def inject_noise(nodes_E, nodes_I):
-    p_rate = 25.0
-    A_noise = 1.0
+    p_rate = 25.0  # this is used to simulate input from neurons around the populations
+    A_noise = 1.0  # strength of synapses from noise input [pA]
     delay = dict(distribution='normal_clipped', mu=10., sigma=20., low=3., high=200.)
 
     noise = nest.Create('poisson_generator', 1, {'rate': p_rate})
 
-    nest.Connect(noise, nodes_E + nodes_I, syn_spec={'model': 'static_synapse',
-                                                     'weight': {
-                                                         'distribution': 'normal',
-                                                         'mu': A_noise,
-                                                         'sigma': 0.7 * A_noise
-                                                     },
-                                                     'delay': dict(distribution='normal_clipped',
-                                                                   mu=10., sigma=20.,
-                                                                   low=3., high=200.)
+    @staticmethod
+    def truncated_normal(mean, stddev, minval, maxval):
+        return np.clip(np.random.normal(mean, stddev), minval, maxval)
+
+    nest.Connect(noise,
+                 nodes_E + nodes_I,
+                 syn_spec={#'model': 'static_synapse',
+                           #'weight': np.random.normal(0, math.sqrt(32)),
+                           'weight': np.random.normal(A_noise, 0.7 * A_noise),
+                           'delay': truncated_normal(10., 20., 3., 200.)
     })
 
 
